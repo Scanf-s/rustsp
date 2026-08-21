@@ -28,6 +28,9 @@ rustc-ice-*.txt
 
 /target
 
-# rustsp: 로컬 테스트 도구와 산출물
-/tools/
+# rustsp: build output
 output.h264
+
+# Notes live in Notion, not in the repo
+/docs/
+

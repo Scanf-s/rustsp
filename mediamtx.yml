@@ -1,0 +1,28 @@
+# mediamtx configuration for the rustsp test rig.
+#
+# Only RTSP is enabled. Turning the other servers off cuts the log noise down to the
+# RTSP conversation we actually care about, and stops mediamtx from generating a
+# self-signed certificate (auto.crt / auto.key) in its working directory.
+
+logLevel: info
+
+rtsp: true
+rtspAddress: :8554
+# Our client asks for RTP/AVP/TCP (interleaved). udp stays enabled so the UDP
+# transport is available later without editing this file.
+rtspTransports: [udp, tcp]
+
+rtmp: false
+hls: false
+webrtc: false
+srt: false
+moq: false
+
+api: false
+metrics: false
+pprof: false
+playback: false
+
+paths:
+  test:
+    source: publisher

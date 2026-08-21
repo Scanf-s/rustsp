@@ -1,0 +1,59 @@
+# Test rig for the rustsp client: an RTSP server plus something publishing into it.
+#
+#   docker compose up -d        start both
+#   docker compose logs -f      watch the RTSP conversation from the server side
+#   docker compose down         stop and remove
+#
+# The stream lands at rtsp://127.0.0.1:8554/test, which is what src/main.rs connects to.
+# Both services use the same image, so only one pull is needed: the -ffmpeg variant of
+# the mediamtx image ships an ffmpeg binary.
+
+services:
+  mediamtx:
+    image: bluenviron/mediamtx:latest-ffmpeg
+    container_name: rustsp-mediamtx
+    volumes:
+      - ./mediamtx.yml:/mediamtx.yml:ro
+    ports:
+      # Bound to localhost only: this is a test rig, not a service.
+      - "127.0.0.1:8554:8554"
+      # Publish these as well if you add the UDP transport later. RTSP negotiates
+      # UDP port pairs at SETUP time, which is exactly the kind of thing container
+      # port mapping is bad at, so expect to widen this range.
+      # - "127.0.0.1:8000:8000/udp"   # RTP
+      # - "127.0.0.1:8001:8001/udp"   # RTCP
+    restart: unless-stopped
+
+  publisher:
+    image: bluenviron/mediamtx:latest-ffmpeg
+    container_name: rustsp-publisher
+    depends_on:
+      - mediamtx
+    # An endless test pattern with a moving clock, encoded as H.264.
+    #   -g 30            one IDR per second, so a late client gets a picture fast
+    #   -tune zerolatency no B-frames, which keeps timestamps easy to follow
+    #   -profile baseline no CABAC, so the bitstream stays simple to reason about
+    entrypoint: ["ffmpeg"]
+    command:
+      - "-hide_banner"
+      - "-re"
+      - "-f"
+      - "lavfi"
+      - "-i"
+      - "testsrc2=size=640x480:rate=30"
+      - "-c:v"
+      - "libx264"
+      - "-profile:v"
+      - "baseline"
+      - "-tune"
+      - "zerolatency"
+      - "-g"
+      - "30"
+      - "-pix_fmt"
+      - "yuv420p"
+      - "-f"
+      - "rtsp"
+      - "-rtsp_transport"
+      - "tcp"
+      - "rtsp://mediamtx:8554/test"
+    restart: unless-stopped
