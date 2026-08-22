@@ -3,7 +3,8 @@
 // Handshake:  OPTIONS -> DESCRIBE -> SETUP -> PLAY -> TEARDOWN
 // Media:      interleaved RTP on the same TCP connection, depacketized to output.h264
 //
-// The handshake works today. The media path needs three functions you write:
+// The handshake already works. The media path still needs three functions, and
+// those are the ones you write:
 //   transport::read_frame   (src/transport.rs)
 //   rtp::packet::parse      (src/rtp/packet.rs)
 //   rtp::h264::Depacketizer (src/rtp/h264.rs)
@@ -43,7 +44,7 @@ fn run() -> Result<()> {
     let mut session = Session::connect(URL)?;
     session.trace = std::env::var("RUSTSP_TRACE").as_deref() != Ok("0");
 
-    // --- OPTIONS: what does this server support? ---
+    // --- OPTIONS: which methods does this server support? ---
     let options = session.options()?;
     println!(
         "server: {}",
@@ -54,7 +55,7 @@ fn run() -> Result<()> {
         options.header("Public").unwrap_or("(no Public header)")
     );
 
-    // --- DESCRIBE: what is in this stream? ---
+    // --- DESCRIBE: what does this stream contain? ---
     let sdp = session.describe()?;
     let video = sdp
         .video()
@@ -77,7 +78,7 @@ fn run() -> Result<()> {
         _ => println!("  no SPS/PPS in the SDP; they will arrive in the stream as STAP-A"),
     }
 
-    // SETUP goes to the TRACK url, which may be relative to the presentation url.
+    // SETUP is sent to the track URL, which can be relative to the presentation URL.
     let track_url = sdp::resolve_control(
         session.base_url(),
         video.control.as_deref().unwrap_or("*"),
@@ -85,18 +86,18 @@ fn run() -> Result<()> {
     let sps = video.sps.clone();
     let pps = video.pps.clone();
 
-    // --- SETUP: negotiate transport, receive a Session id ---
+    // --- SETUP: agree on a transport and receive a Session id ---
     let setup = session.setup(&track_url)?;
     println!("\nsetup ok");
     println!("  transport: {}", setup.header("Transport").unwrap_or("?"));
     println!("  session:   {}", session.session_id().unwrap_or("?"));
     println!("  state:     {:?}", session.state());
 
-    // --- PLAY: media starts flowing on this same connection ---
+    // --- PLAY: the media starts to arrive on this same connection ---
     let play = session.play()?;
     println!("\nplay ok, state {:?}", session.state());
     if let Some(info) = play.header("RTP-Info") {
-        // seq and rtptime tell you what the first RTP packet will carry.
+        // seq and rtptime describe what the first RTP packet will contain.
         println!("  RTP-Info: {info}");
     }
 
@@ -116,8 +117,9 @@ fn run() -> Result<()> {
     Ok(())
 }
 
-/// Read interleaved frames until we have collected enough video, writing Annex B
-/// to output.h264. This is the wiring for the three functions you implement.
+/// Read interleaved frames until enough video has been collected, and write the
+/// result to output.h264 in Annex B format. This function is only the wiring around
+/// the three functions that you implement.
 fn receive_media(session: &mut Session, sps: Option<&[u8]>, pps: Option<&[u8]>) -> Result<()> {
     use rtp::h264::{Depacketizer, START_CODE};
 
@@ -125,8 +127,9 @@ fn receive_media(session: &mut Session, sps: Option<&[u8]>, pps: Option<&[u8]>) 
 
     let mut file = BufWriter::new(File::create(OUTPUT)?);
 
-    // A decoder needs SPS and PPS before any slice. If the SDP had them, write them
-    // first so the file is playable from byte zero.
+    // A decoder needs SPS and PPS before it can decode any slice. When the SDP
+    // contained them, they are written first, so that the file can be played from
+    // the very first byte.
     for param in [sps, pps].into_iter().flatten() {
         file.write_all(&START_CODE)?;
         file.write_all(param)?;
@@ -143,7 +146,7 @@ fn receive_media(session: &mut Session, sps: Option<&[u8]>, pps: Option<&[u8]>) 
         let frame = transport::read_frame(session.reader())?;
         frames += 1;
 
-        // Channel 1 is RTCP, which we do not need in order to write a file.
+        // Channel 1 carries RTCP, which is not needed in order to write this file.
         if frame.channel != transport::CHANNEL_RTP {
             continue;
         }

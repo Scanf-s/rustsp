@@ -1,14 +1,17 @@
 // SDP parsing (RFC 8866; the H.264 specific attributes are RFC 6184 section 8)
 //
-// SDP is a flat list of "key=value" lines. Everything after an "m=" line belongs to
-// that media section until the next "m=" line. We only need four things:
+// An SDP document is a flat list of "key=value" lines. Every line after an "m=" line
+// belongs to that media section, until the next "m=" line begins. This client needs
+// four pieces of information:
 //
-//   m=video 0 RTP/AVP 96              -> media kind and payload type (port is a
-//                                        placeholder; the real one comes from SETUP)
-//   a=control:trackID=0               -> the URL to send SETUP to
-//   a=rtpmap:96 H264/90000            -> what the dynamic payload type 96 means
+//   m=video 0 RTP/AVP 96              -> the media kind and the payload type. The
+//                                        port is only a placeholder, because the
+//                                        real one is negotiated in SETUP.
+//   a=control:trackID=0               -> the URL that SETUP has to be sent to
+//   a=rtpmap:96 H264/90000            -> the meaning of dynamic payload type 96
 //   a=fmtp:96 sprop-parameter-sets=Z0IAKY..,aM48gA==
-//                                     -> base64 SPS and PPS, needed to start a decoder
+//                                     -> SPS and PPS in base64, which a decoder
+//                                        needs before it can start
 
 use crate::error::{protocol, Result};
 
@@ -59,8 +62,9 @@ pub fn parse(text: &str) -> Result<Sdp> {
                 };
                 match name {
                     "control" => match sdp.media.last_mut() {
-                        // Before any m= line, a=control belongs to the session
-                        // (the aggregate URL). After one, it names that track.
+                        // As long as no m= line has appeared, a=control describes
+                        // the session and gives the aggregate URL. After an m= line
+                        // it describes that one track.
                         Some(m) => m.control = Some(rest.to_string()),
                         None => sdp.session_control = Some(rest.to_string()),
                     },
@@ -77,8 +81,9 @@ pub fn parse(text: &str) -> Result<Sdp> {
                     "fmtp" => {
                         // fmtp:<pt> <param>;<param>...
                         // The payload type comes first and is not a parameter, so
-                        // strip it before splitting on ';'. Miss this and any
-                        // parameter that happens to be listed first is invisible.
+                        // it has to be removed before the rest is split on ';'. If
+                        // it stays, the parameter that is listed first remains
+                        // attached to it and is never recognized.
                         if let Some(m) = sdp.media.last_mut() {
                             let params = rest.split_once(' ').map_or("", |(_pt, p)| p);
                             for param in params.split(';') {
@@ -104,9 +109,9 @@ pub fn parse(text: &str) -> Result<Sdp> {
     Ok(sdp)
 }
 
-/// Resolve a track's `a=control` value against the presentation URL.
-/// It may be absolute ("rtsp://host/stream/trackID=0"), a bare relative token
-/// ("trackID=0"), or "*" meaning "the presentation URL itself".
+/// Build the full track URL from an `a=control` value and the presentation URL.
+/// The value can be absolute ("rtsp://host/stream/trackID=0"), a short relative
+/// token ("trackID=0"), or "*", which means the presentation URL itself.
 pub fn resolve_control(base: &str, control: &str) -> String {
     if control.starts_with("rtsp://") {
         return control.to_string();
@@ -117,8 +122,8 @@ pub fn resolve_control(base: &str, control: &str) -> String {
     format!("{}/{}", base.trim_end_matches('/'), control.trim_start_matches('/'))
 }
 
-/// Minimal base64 decoder. Only here so the project stays dependency free;
-/// there is nothing to learn about RTSP in it.
+/// A very small base64 decoder. It is here only so that the project needs no
+/// dependencies. There is nothing about RTSP to learn from it.
 fn base64_decode(input: &str) -> Option<Vec<u8>> {
     fn sextet(c: u8) -> Option<u32> {
         Some(match c {
@@ -155,7 +160,7 @@ fn base64_decode(input: &str) -> Option<Vec<u8>> {
 mod tests {
     use super::*;
 
-    // What mediamtx actually sends for an H.264 stream.
+    // This is the SDP that mediamtx really sends for an H.264 stream.
     const MEDIAMTX_SDP: &str = "v=0\r\n\
         o=- 0 0 IN IP4 127.0.0.1\r\n\
         s=Stream\r\n\
@@ -181,7 +186,7 @@ mod tests {
     fn extracts_sps_and_pps() {
         let sdp = parse(MEDIAMTX_SDP).unwrap();
         let v = sdp.video().unwrap();
-        // NAL type is the low 5 bits: 7 = SPS, 8 = PPS.
+        // The NAL type sits in the lowest 5 bits: 7 means SPS, 8 means PPS.
         assert_eq!(v.sps.as_ref().unwrap()[0] & 0x1F, 7);
         assert_eq!(v.pps.as_ref().unwrap()[0] & 0x1F, 8);
     }
@@ -195,8 +200,8 @@ mod tests {
 
     #[test]
     fn sprop_is_found_even_as_the_first_fmtp_parameter() {
-        // The payload type ("96 ") sits before the first parameter, so a naive
-        // split on ';' leaves it glued to whatever comes first.
+        // The payload type ("96 ") comes before the first parameter, so a simple
+        // split on ';' leaves it attached to the parameter that is listed first.
         let sdp = parse(
             "m=video 0 RTP/AVP 96\r\n\
              a=fmtp:96 sprop-parameter-sets=Z0IAKeKQCgC3YC3AWA==,aM48gA==\r\n",

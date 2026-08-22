@@ -1,9 +1,10 @@
 // Error type for the whole client.
 //
-// Three failure modes worth telling apart:
-// - Io: the socket or the filesystem failed
-// - Protocol: bytes arrived, but they did not mean what RTSP says they should
-// - Status: a well formed response that refused the request (404, 459, 551, ...)
+// There are three kinds of failure, and it is useful to keep them apart:
+// - Io: the socket or the file system reported an error
+// - Protocol: the bytes arrived, but they do not follow the rules of RTSP
+// - Status: the message was correct RTSP, but the server refused the request
+//   (404, 459, 551 and so on)
 
 use std::fmt;
 
@@ -34,7 +35,7 @@ impl From<std::io::Error> for Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// Shorthand for building a Protocol error.
+/// A short way to build a Protocol error.
 pub fn protocol<T>(msg: impl Into<String>) -> Result<T> {
     Err(Error::Protocol(msg.into()))
 }

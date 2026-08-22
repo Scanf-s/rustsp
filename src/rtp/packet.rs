@@ -13,20 +13,22 @@
 // Byte 0:  V (2 bits) | P (1) | X (1) | CC (4)
 // Byte 1:  M (1 bit)  | PT (7)
 //
-// Write the bit extraction by hand. Masks and shifts:
+// Extract the bit fields yourself, with masks and shifts:
 //   let version = (b[0] >> 6) & 0b11;
 //   let marker  = (b[1] >> 7) & 0b1 == 1;
 //   let pt      = b[1] & 0b0111_1111;
 //
-// Where the payload starts:
-//   12 bytes fixed header
-//   + 4 * CC          (contributing source list, usually 0)
-//   + if X: 4 + 4 * (extension length in 32 bit words, from bytes 2..4 of the
-//                    extension header)
+// The payload begins after:
+//   the 12 byte fixed header
+//   + 4 * CC bytes    (the contributing source list, which is usually empty)
+//   + if X is set: 4 bytes + 4 * (the extension length in 32 bit words, which is
+//                  stored in bytes 2..4 of the extension header)
 //
-// Multi byte fields are big endian: u16::from_be_bytes / u32::from_be_bytes.
+// Fields that are longer than one byte are big endian, so use u16::from_be_bytes or
+// u32::from_be_bytes.
 //
-// Reject the packet if version != 2, or if it is too short for the header it claims.
+// Return an error if the version is not 2, or if the packet is shorter than the
+// header describes.
 //
 // Run `cargo test rtp::packet` while you work.
 
@@ -74,7 +76,8 @@ mod tests {
 
     #[test]
     fn marker_bit_is_separate_from_payload_type() {
-        // Same PT 96, marker clear: byte 1 = 0x60 instead of 0xE0.
+        // The payload type is still 96, but the marker bit is 0, so byte 1 holds
+        // 0x60 instead of 0xE0.
         let mut bytes = PLAIN.to_vec();
         bytes[1] = 0x60;
         let p = parse(&bytes).unwrap();
@@ -84,7 +87,8 @@ mod tests {
 
     #[test]
     fn csrc_list_shifts_the_payload() {
-        // CC = 2 -> byte 0 = 0x82, and 8 extra bytes sit before the payload.
+        // CC = 2 makes byte 0 equal to 0x82, and 8 extra bytes come before the
+        // payload.
         let bytes = [
             0x82, 0xE0, 0x00, 0x01, //
             0x00, 0x00, 0x00, 0x00, // timestamp
@@ -99,8 +103,9 @@ mod tests {
 
     #[test]
     fn extension_header_shifts_the_payload() {
-        // X = 1 -> byte 0 = 0x90. Extension header: 2 bytes profile, 2 bytes length
-        // in 32 bit words (here 1), then 4 bytes of extension data.
+        // X = 1 makes byte 0 equal to 0x90. The extension header holds 2 bytes of
+        // profile, then 2 bytes of length counted in 32 bit words (here 1), and
+        // after that 4 bytes of extension data.
         let bytes = [
             0x90, 0xE0, 0x00, 0x01, //
             0x00, 0x00, 0x00, 0x00, // timestamp
@@ -127,7 +132,8 @@ mod tests {
 
     #[test]
     fn rejects_a_csrc_count_the_packet_is_too_short_for() {
-        // Claims CC = 15 (60 extra bytes) in a 15 byte packet.
+        // The header announces CC = 15, which means 60 extra bytes, inside a
+        // packet of 15 bytes.
         let mut bytes = PLAIN.to_vec();
         bytes[0] = 0x8F;
         assert!(parse(&bytes).is_err());

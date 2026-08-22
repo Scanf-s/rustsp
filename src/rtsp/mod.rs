@@ -1,18 +1,21 @@
 // RTSP session state (RFC 2326)
 //
-// The Session owns the connection, so it also owns the two things that belong to a
-// connection rather than to a single request:
-//   - the CSeq counter (per connection, not global; see RFC 2326 section 12.17)
-//   - the Session id issued by the server in the SETUP response
+// The Session owns the connection, so it also holds the two values that belong to
+// the connection rather than to a single request:
+//   - the CSeq counter, which counts per connection and not globally
+//     (see RFC 2326 section 12.17)
+//   - the Session id that the server returns in the SETUP response
 //
-// Callers never build a request string or manage CSeq. They say what they want:
+// A caller never builds a request string and never updates CSeq. A caller only
+// states what it wants:
 //   session.describe()?;
 //   session.setup(&track_url)?;
 //
-// One BufReader owns the TcpStream for the whole connection, and writes go out
-// through get_mut(). There is deliberately no way to reach the raw stream, because
-// reading it directly would skip the bytes BufReader has already buffered. That
-// matters from week 3 on, when interleaved RTP arrives on this same socket.
+// A single BufReader owns the TcpStream for the whole connection, and every write
+// goes through get_mut(). There is no way to reach the raw stream, and that is
+// intentional: reading the stream directly would skip the bytes that BufReader has
+// already buffered. This becomes important from week 3, when interleaved RTP
+// arrives on the same socket.
 
 pub mod request;
 pub mod response;
@@ -25,8 +28,8 @@ use crate::error::{protocol, Result};
 use crate::sdp::{self, Sdp};
 use response::Response;
 
-/// Where the session is in its lifecycle. RTSP is stateful: which methods are
-/// valid depends on this (RFC 2326 Appendix A).
+/// The current point in the session lifecycle. RTSP keeps state, so the set of
+/// methods that the server accepts depends on this value (RFC 2326 Appendix A).
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum State {
     Init,
@@ -36,13 +39,14 @@ pub enum State {
 
 pub struct Session {
     conn: BufReader<TcpStream>,
-    /// The presentation (aggregate) URL. PLAY, PAUSE and TEARDOWN go here.
+    /// The presentation URL, which is also called the aggregate URL. PLAY, PAUSE
+    /// and TEARDOWN are sent to this URL.
     base_url: String,
     cseq: u32,
     session_id: Option<String>,
     state: State,
-    /// Print every request and response to stderr. This is the learning instrument:
-    /// what you predicted should match what shows up here.
+    /// Print every request and every response to stderr. This trace is the main
+    /// learning tool, because what you expected should match what appears here.
     pub trace: bool,
 }
 
@@ -50,8 +54,8 @@ impl Session {
     pub fn connect(url: &str) -> Result<Self> {
         let authority = authority_of(url)?;
         let stream = TcpStream::connect(&authority)?;
-        // Fail fast instead of hanging: nearly every framing mistake in RTSP shows
-        // up as a block, not an error.
+        // Report an error quickly instead of waiting forever. Almost every framing
+        // mistake in RTSP appears as a read that never finishes, not as an error.
         stream.set_read_timeout(Some(Duration::from_secs(5)))?;
 
         Ok(Session {
@@ -76,13 +80,14 @@ impl Session {
         self.session_id.as_deref()
     }
 
-    /// Hand the buffered reader to the transport layer once PLAY has succeeded.
-    /// Everything after this point is interleaved binary on the same connection.
+    /// Give the buffered reader to the transport layer after PLAY has succeeded.
+    /// From that point on, the same connection carries interleaved binary data.
     pub fn reader(&mut self) -> &mut BufReader<TcpStream> {
         &mut self.conn
     }
 
-    /// Send one request and read one response. CSeq and Session are added here.
+    /// Send one request and read one response. The CSeq and Session headers are
+    /// added here.
     pub fn request(&mut self, method: &str, url: &str, extra: &[(&str, &str)]) -> Result<Response> {
         self.cseq += 1;
 
@@ -112,8 +117,8 @@ impl Session {
             }
         }
 
-        // The response must carry back the CSeq we sent, which is how a reply is
-        // matched to its request.
+        // The response has to repeat the CSeq value that was sent, because that is
+        // how a response is matched with its request.
         if let Some(echo) = resp.header("CSeq") {
             if echo.trim().parse::<u32>() != Ok(self.cseq) {
                 return protocol(format!("CSeq mismatch: sent {}, got {echo}", self.cseq));
@@ -136,9 +141,10 @@ impl Session {
         sdp::parse(&resp.body_text())
     }
 
-    /// SETUP goes to the TRACK url (from a=control), never the aggregate url.
-    /// Sending it to the aggregate url earns a 459 (RFC 2326 section 14.2).
-    /// We ask for TCP interleaved: RTP on channel 0, RTCP on channel 1.
+    /// SETUP is sent to the track URL, which comes from a=control, and never to
+    /// the aggregate URL. If it is sent to the aggregate URL, the server answers
+    /// with 459 (RFC 2326 section 14.2). Here the client asks for TCP interleaved
+    /// transport, with RTP on channel 0 and RTCP on channel 1.
     pub fn setup(&mut self, track_url: &str) -> Result<Response> {
         let resp = self
             .request(
@@ -148,7 +154,7 @@ impl Session {
             )?
             .ok()?;
 
-        // "Session: 12345678;timeout=60" -> keep the id, drop the parameters.
+        // "Session: 12345678;timeout=60": keep the id and remove the parameters.
         let id = resp
             .header("Session")
             .map(|v| v.split(';').next().unwrap_or(v).trim().to_string());
@@ -160,8 +166,8 @@ impl Session {
         Ok(resp)
     }
 
-    /// PLAY goes to the aggregate url and needs the Session header, which
-    /// `request` attaches automatically now that SETUP has run.
+    /// PLAY is sent to the aggregate URL and needs the Session header. Now that
+    /// SETUP has run, `request` adds that header automatically.
     pub fn play(&mut self) -> Result<Response> {
         if self.state != State::Ready {
             return protocol(format!("PLAY requires state Ready, was {:?}", self.state));
@@ -181,16 +187,18 @@ impl Session {
     }
 
     #[allow(dead_code)] // week 3
-    /// Keepalive. RTSP sessions expire if the client goes quiet, and OPTIONS is the
-    /// conventional way to stay alive (GET_PARAMETER is the other one).
-    /// Only safe to call while no interleaved data is in flight.
+    /// Keep the session alive. An RTSP session expires when the client sends
+    /// nothing for a while, and OPTIONS is the usual method for keeping it open
+    /// (GET_PARAMETER is the other one). This is only safe to call when no
+    /// interleaved data is being transferred.
     pub fn keepalive(&mut self) -> Result<Response> {
         let url = self.base_url.clone();
         self.request("OPTIONS", &url, &[])?.ok()
     }
 }
 
-/// "rtsp://127.0.0.1:8554/test" -> "127.0.0.1:8554". Port 554 is the RTSP default.
+/// Turn "rtsp://127.0.0.1:8554/test" into "127.0.0.1:8554". When the URL states no
+/// port, 554 is used, because that is the default port for RTSP.
 fn authority_of(url: &str) -> Result<String> {
     let Some(rest) = url.strip_prefix("rtsp://") else {
         return protocol(format!("url must start with rtsp:// : {url}"));
@@ -220,8 +228,8 @@ mod tests {
 
 #[cfg(test)]
 mod handshake_tests {
-    //! Drives the full handshake against a mock RTSP server, so the session logic
-    //! can be verified without mediamtx or ffmpeg running.
+    //! Runs the complete handshake against a mock RTSP server, so that the session
+    //! logic can be checked without mediamtx or ffmpeg running.
 
     use super::*;
     use std::io::{BufRead, BufReader as IoBufReader};
@@ -238,7 +246,8 @@ mod handshake_tests {
         a=fmtp:96 sprop-parameter-sets=Z0IAKeKQCgC3YC3AWA==,aM48gA==\r\n\
         a=control:trackID=0\r\n";
 
-    /// Answers one handshake and returns every request it received, verbatim.
+    /// Answer one handshake and return every request that arrived, exactly as it
+    /// was received.
     fn mock_server() -> (String, thread::JoinHandle<Vec<String>>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
@@ -254,7 +263,7 @@ mod handshake_tests {
                 let mut method = String::new();
                 let mut cseq = String::new();
 
-                // Read one request: request line, headers, blank line.
+                // Read one request: the request line, the headers, the empty line.
                 loop {
                     let mut line = String::new();
                     if reader.read_line(&mut line).unwrap() == 0 {
@@ -324,7 +333,7 @@ mod handshake_tests {
 
         let track = crate::sdp::resolve_control(session.base_url(), "trackID=0");
         session.setup(&track).unwrap();
-        assert_eq!(session.session_id(), Some("12345678")); // ";timeout=60" stripped
+        assert_eq!(session.session_id(), Some("12345678")); // ";timeout=60" removed
         assert_eq!(session.state(), State::Ready);
 
         let play = session.play().unwrap();
@@ -335,7 +344,7 @@ mod handshake_tests {
         assert_eq!(session.state(), State::Init);
         assert_eq!(session.session_id(), None);
 
-        // Now check what actually went over the wire.
+        // Now check what was really sent over the connection.
         let requests = server.join().unwrap();
         let methods: Vec<&str> = requests
             .iter()
@@ -343,7 +352,7 @@ mod handshake_tests {
             .collect();
         assert_eq!(methods, ["OPTIONS", "DESCRIBE", "SETUP", "PLAY", "TEARDOWN"]);
 
-        // CSeq increments by one per request, starting at 1.
+        // CSeq starts at 1 and increases by one for every request.
         for (i, r) in requests.iter().enumerate() {
             assert!(
                 r.contains(&format!("CSeq: {}\r\n", i + 1)),
@@ -352,13 +361,14 @@ mod handshake_tests {
             assert!(r.ends_with("\r\n\r\n"), "request {i} was not terminated once");
         }
 
-        // Session is absent until SETUP replies, then present on every request.
+        // There is no Session header until SETUP has answered. After that, every
+        // request carries it.
         assert!(!requests[0].contains("Session:"));
         assert!(!requests[2].contains("Session:")); // the SETUP request itself
         assert!(requests[3].contains("Session: 12345678\r\n")); // PLAY
         assert!(requests[4].contains("Session: 12345678\r\n")); // TEARDOWN
 
-        // SETUP goes to the track url, PLAY to the aggregate url.
+        // SETUP is sent to the track URL, and PLAY to the aggregate URL.
         assert!(requests[2].starts_with("SETUP rtsp://127.0.0.1:"));
         assert!(requests[2].lines().next().unwrap().contains("/test/trackID=0"));
         assert!(requests[3].lines().next().unwrap().ends_with("/test RTSP/1.0"));
@@ -368,8 +378,9 @@ mod handshake_tests {
     fn play_before_setup_is_rejected_locally() {
         let (url, _server) = mock_server();
         let mut session = Session::connect(&url).unwrap();
-        // No SETUP, so no Session id. Catch it here instead of sending a request
-        // the server would answer with 454 Session Not Found.
+        // SETUP has not run, so there is no Session id. The client detects this by
+        // itself, instead of sending a request that the server would answer with
+        // 454 Session Not Found.
         assert!(session.play().is_err());
     }
 }
