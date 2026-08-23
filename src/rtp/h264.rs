@@ -92,10 +92,10 @@ mod tests {
             0x00, 0x04, 0x68, 0xCE, 0x38, 0x80, // len 4, PPS (type 8)
         ];
         let out = d.push(100, &payload).unwrap();
-        assert_eq!(out, vec![
-            vec![0x67, 0x42, 0x00, 0x1E],
-            vec![0x68, 0xCE, 0x38, 0x80],
-        ]);
+        assert_eq!(
+            out,
+            vec![vec![0x67, 0x42, 0x00, 0x1E], vec![0x68, 0xCE, 0x38, 0x80],]
+        );
     }
 
     // FU-A indicator 0x7C = F=0, NRI=3, type=28.

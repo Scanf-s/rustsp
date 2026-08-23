@@ -41,24 +41,37 @@ mod tests {
     #[test]
     fn minimal_request_has_exact_bytes() {
         let r = build("OPTIONS", "rtsp://127.0.0.1:8554/test", 1, &[]);
-        assert_eq!(r, "OPTIONS rtsp://127.0.0.1:8554/test RTSP/1.0\r\nCSeq: 1\r\n\r\n");
+        assert_eq!(
+            r,
+            "OPTIONS rtsp://127.0.0.1:8554/test RTSP/1.0\r\nCSeq: 1\r\n\r\n"
+        );
     }
 
     #[test]
     fn nothing_follows_the_blank_line() {
         // If any byte follows the final \r\n\r\n, the server reads it as the
         // beginning of the next request on the same connection.
-        let r = build("DESCRIBE", "rtsp://h/s", 2, &[("Accept", "application/sdp")]);
+        let r = build(
+            "DESCRIBE",
+            "rtsp://h/s",
+            2,
+            &[("Accept", "application/sdp")],
+        );
         assert!(r.ends_with("\r\n\r\n"));
         assert!(!r.ends_with("\r\n\r\n\r\n"));
     }
 
     #[test]
     fn headers_appear_in_order_after_cseq() {
-        let r = build("SETUP", "rtsp://h/s/trackID=0", 3, &[
-            ("Transport", "RTP/AVP/TCP;unicast;interleaved=0-1"),
-            ("Session", "12345678"),
-        ]);
+        let r = build(
+            "SETUP",
+            "rtsp://h/s/trackID=0",
+            3,
+            &[
+                ("Transport", "RTP/AVP/TCP;unicast;interleaved=0-1"),
+                ("Session", "12345678"),
+            ],
+        );
         assert_eq!(
             r,
             "SETUP rtsp://h/s/trackID=0 RTSP/1.0\r\n\

@@ -35,7 +35,7 @@
 //
 // Run `cargo test rtp::packet` while you work.
 
-use crate::error::{protocol, Result};
+use crate::error::{Result, protocol};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct RtpPacket {
@@ -50,9 +50,8 @@ pub struct RtpPacket {
 // parse a given RTP packet to RtpPacket struct.
 // If invalid, it returns an error
 pub fn parse(bytes: &[u8]) -> Result<RtpPacket> {
-
     // Check bytes are empty
-    if bytes.len() == 0 {
+    if bytes.is_empty() {
         return protocol("empty bytes are given");
     }
 
@@ -65,9 +64,9 @@ pub fn parse(bytes: &[u8]) -> Result<RtpPacket> {
             version
         ));
     }
-    let extension = (bytes[0] >> 4) &0b1; // 1 bit
+    let extension = (bytes[0] >> 4) & 0b1; // 1 bit
     let cc: u8 = bytes[0] & 0b0000_1111; // 4 bits
-    
+
     // Check if this packet contains adequate bytes regarding from cc
     let min_packet_bytes = 12 + cc as usize * 4;
     if bytes.len() < min_packet_bytes {
@@ -103,13 +102,11 @@ pub fn parse(bytes: &[u8]) -> Result<RtpPacket> {
         // if extension is set, RTP extension header must be appended to the RTP header (after the offset bytes)
         // read extension length
         if bytes.len() < offset + 4 {
-            return protocol(
-                format!(
-                    "extension header needs 4 bytes at offset {}, but the packet has {} bytes",
-                    offset,
-                    bytes.len()
-                )
-            );
+            return protocol(format!(
+                "extension header needs 4 bytes at offset {}, but the packet has {} bytes",
+                offset,
+                bytes.len()
+            ));
         }
         let extension_length = u16::from_be_bytes([bytes[offset + 2], bytes[offset + 3]]);
 
@@ -118,24 +115,22 @@ pub fn parse(bytes: &[u8]) -> Result<RtpPacket> {
     }
 
     if bytes.len() < offset {
-        return protocol(
-            format!(
-                "to get payload from the given bytes, need more than {} bytes, but the packet has only {} bytes",
-                offset,
-                bytes.len()
-            )
-        );
+        return protocol(format!(
+            "to get payload from the given bytes, need more than {} bytes, but the packet has only {} bytes",
+            offset,
+            bytes.len()
+        ));
     }
     let payload = bytes[offset..].to_vec();
 
     // Build prased RTPPacket
-    let packet = RtpPacket{
-        marker: marker,
-        payload_type: payload_type,
-        sequence_number: sequence_number,
-        timestamp: timestamp,
-        ssrc: ssrc,
-        payload: payload,
+    let packet = RtpPacket {
+        marker,
+        payload_type,
+        sequence_number,
+        timestamp,
+        ssrc,
+        payload,
     };
 
     Ok(packet)
@@ -223,7 +218,7 @@ mod tests {
 
     #[test]
     fn rejects_a_csrc_count_the_packet_is_too_short_for() {
-        // The header announces CC = 15, which means 60 extra bytes, 
+        // The header announces CC = 15, which means 60 extra bytes,
         // inside a packet of 15 bytes.
         let mut bytes = PLAIN.to_vec();
         bytes[0] = 0x8F; // 1000 1111

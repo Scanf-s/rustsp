@@ -13,7 +13,7 @@
 //                                     -> SPS and PPS in base64, which a decoder
 //                                        needs before it can start
 
-use crate::error::{protocol, Result};
+use crate::error::{Result, protocol};
 
 #[derive(Debug, Default)]
 pub struct Media {
@@ -43,7 +43,9 @@ pub fn parse(text: &str) -> Result<Sdp> {
 
     for raw in text.lines() {
         let line = raw.trim_end_matches('\r');
-        let Some((key, value)) = line.split_once('=') else { continue };
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
 
         match key {
             // m=<media> <port> <proto> <fmt ...>
@@ -53,7 +55,11 @@ pub fn parse(text: &str) -> Result<Sdp> {
                 let _port = f.next();
                 let _proto = f.next();
                 let payload_type = f.next().and_then(|p| p.parse().ok()).unwrap_or(0);
-                sdp.media.push(Media { kind, payload_type, ..Default::default() });
+                sdp.media.push(Media {
+                    kind,
+                    payload_type,
+                    ..Default::default()
+                });
             }
             "a" => {
                 let (name, rest) = match value.split_once(':') {
@@ -119,7 +125,11 @@ pub fn resolve_control(base: &str, control: &str) -> String {
     if control == "*" || control.is_empty() {
         return base.to_string();
     }
-    format!("{}/{}", base.trim_end_matches('/'), control.trim_start_matches('/'))
+    format!(
+        "{}/{}",
+        base.trim_end_matches('/'),
+        control.trim_start_matches('/')
+    )
 }
 
 /// A very small base64 decoder. It is here only so that the project needs no
@@ -215,7 +225,10 @@ mod tests {
     #[test]
     fn control_urls_resolve() {
         let base = "rtsp://127.0.0.1:8554/test";
-        assert_eq!(resolve_control(base, "trackID=0"), "rtsp://127.0.0.1:8554/test/trackID=0");
+        assert_eq!(
+            resolve_control(base, "trackID=0"),
+            "rtsp://127.0.0.1:8554/test/trackID=0"
+        );
         assert_eq!(resolve_control(base, "*"), base);
         assert_eq!(resolve_control(base, "rtsp://other/x"), "rtsp://other/x");
     }

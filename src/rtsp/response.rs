@@ -16,7 +16,7 @@
 
 use std::io::BufRead;
 
-use crate::error::{protocol, Error, Result};
+use crate::error::{Error, Result, protocol};
 
 #[derive(Debug)]
 pub struct Response {
@@ -45,7 +45,10 @@ impl Response {
         if (200..300).contains(&self.status) {
             Ok(self)
         } else {
-            Err(Error::Status { code: self.status, reason: self.reason })
+            Err(Error::Status {
+                code: self.status,
+                reason: self.reason,
+            })
         }
     }
 }
@@ -102,7 +105,12 @@ pub fn read<R: BufRead>(reader: &mut R) -> Result<Response> {
         reader.read_exact(&mut body)?;
     }
 
-    Ok(Response { status, reason, headers, body })
+    Ok(Response {
+        status,
+        reason,
+        headers,
+        body,
+    })
 }
 
 #[cfg(test)]
@@ -146,7 +154,10 @@ mod tests {
                    RTP-Info: url=rtsp://h/s/track;seq=9810092\r\n\
                    \r\n";
         let r = read(&mut Cursor::new(raw)).unwrap();
-        assert_eq!(r.header("RTP-Info"), Some("url=rtsp://h/s/track;seq=9810092"));
+        assert_eq!(
+            r.header("RTP-Info"),
+            Some("url=rtsp://h/s/track;seq=9810092")
+        );
     }
 
     #[test]

@@ -24,7 +24,7 @@ use std::io::{BufReader, Write};
 use std::net::TcpStream;
 use std::time::Duration;
 
-use crate::error::{protocol, Result};
+use crate::error::{Result, protocol};
 use crate::sdp::{self, Sdp};
 use response::Response;
 
@@ -173,7 +173,9 @@ impl Session {
             return protocol(format!("PLAY requires state Ready, was {:?}", self.state));
         }
         let url = self.base_url.clone();
-        let resp = self.request("PLAY", &url, &[("Range", "npt=0.000-")])?.ok()?;
+        let resp = self
+            .request("PLAY", &url, &[("Range", "npt=0.000-")])?
+            .ok()?;
         self.state = State::Playing;
         Ok(resp)
     }
@@ -220,8 +222,14 @@ mod tests {
 
     #[test]
     fn authority_parsing() {
-        assert_eq!(authority_of("rtsp://127.0.0.1:8554/test").unwrap(), "127.0.0.1:8554");
-        assert_eq!(authority_of("rtsp://cam.local/stream").unwrap(), "cam.local:554");
+        assert_eq!(
+            authority_of("rtsp://127.0.0.1:8554/test").unwrap(),
+            "127.0.0.1:8554"
+        );
+        assert_eq!(
+            authority_of("rtsp://cam.local/stream").unwrap(),
+            "cam.local:554"
+        );
         assert!(authority_of("http://x/y").is_err());
     }
 }
@@ -350,7 +358,10 @@ mod handshake_tests {
             .iter()
             .map(|r| r.split(' ').next().unwrap())
             .collect();
-        assert_eq!(methods, ["OPTIONS", "DESCRIBE", "SETUP", "PLAY", "TEARDOWN"]);
+        assert_eq!(
+            methods,
+            ["OPTIONS", "DESCRIBE", "SETUP", "PLAY", "TEARDOWN"]
+        );
 
         // CSeq starts at 1 and increases by one for every request.
         for (i, r) in requests.iter().enumerate() {
@@ -358,7 +369,10 @@ mod handshake_tests {
                 r.contains(&format!("CSeq: {}\r\n", i + 1)),
                 "request {i} had the wrong CSeq:\n{r}"
             );
-            assert!(r.ends_with("\r\n\r\n"), "request {i} was not terminated once");
+            assert!(
+                r.ends_with("\r\n\r\n"),
+                "request {i} was not terminated once"
+            );
         }
 
         // There is no Session header until SETUP has answered. After that, every
@@ -370,8 +384,20 @@ mod handshake_tests {
 
         // SETUP is sent to the track URL, and PLAY to the aggregate URL.
         assert!(requests[2].starts_with("SETUP rtsp://127.0.0.1:"));
-        assert!(requests[2].lines().next().unwrap().contains("/test/trackID=0"));
-        assert!(requests[3].lines().next().unwrap().ends_with("/test RTSP/1.0"));
+        assert!(
+            requests[2]
+                .lines()
+                .next()
+                .unwrap()
+                .contains("/test/trackID=0")
+        );
+        assert!(
+            requests[3]
+                .lines()
+                .next()
+                .unwrap()
+                .ends_with("/test RTSP/1.0")
+        );
     }
 
     #[test]

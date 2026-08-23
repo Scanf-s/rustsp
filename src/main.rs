@@ -73,16 +73,18 @@ fn run() -> Result<()> {
     );
     match (&video.sps, &video.pps) {
         (Some(sps), Some(pps)) => {
-            println!("  SPS {} bytes, PPS {} bytes (from sprop-parameter-sets)", sps.len(), pps.len())
+            println!(
+                "  SPS {} bytes, PPS {} bytes (from sprop-parameter-sets)",
+                sps.len(),
+                pps.len()
+            )
         }
         _ => println!("  no SPS/PPS in the SDP; they will arrive in the stream as STAP-A"),
     }
 
     // SETUP is sent to the track URL, which can be relative to the presentation URL.
-    let track_url = sdp::resolve_control(
-        session.base_url(),
-        video.control.as_deref().unwrap_or("*"),
-    );
+    let track_url =
+        sdp::resolve_control(session.base_url(), video.control.as_deref().unwrap_or("*"));
     let sps = video.sps.clone();
     let pps = video.pps.clone();
 

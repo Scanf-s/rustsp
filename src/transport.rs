@@ -26,7 +26,7 @@
 // BufRead has Read as a supertrait. So read_exact needs no import of its own here.
 use std::io::BufRead;
 
-use crate::error::{protocol, Result};
+use crate::error::{Result, protocol};
 
 pub const MAGIC: u8 = b'$'; // 0x24 (says that the bytes which follow are binary, not text)
 pub const CHANNEL_RTP: u8 = 0; // negotiated RTP channel no.
@@ -40,7 +40,7 @@ pub struct Frame {
 }
 
 /// Read exactly one interleaved frame.
-/// Every frame is returned, whatever its channel, 
+/// Every frame is returned, whatever its channel,
 /// so the caller decides which channels it wants to keep.
 pub fn read_frame<R: BufRead>(reader: &mut R) -> Result<Frame> {
     // read the whole 4 byte header at once
