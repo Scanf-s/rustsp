@@ -13,17 +13,6 @@
 //   (The types 25..=27 and 29 exist as well. mediamtx does not send them, so this
 //   module returns an error for them.)
 //
-// FU-A layout:
-//
-//   payload[0] = FU indicator:  F(1) | NRI(2) | type=28(5)
-//   payload[1] = FU header:     S(1) | E(1)   | R(1) | type(5)
-//   payload[2..] = the fragment
-//
-//   S marks the first fragment of the NAL unit, and E marks the last one.
-//   When the start fragment arrives, build the original NAL header again as
-//       (indicator & 0xE0) | type
-//   This takes F and NRI from the indicator and the real type from the FU header.
-//   After that, append payload[2..] of every following fragment until E is set.
 //
 // Two situations must never produce a damaged NAL unit:
 //   - A middle or end fragment arrives although no start fragment was seen. Drop it.
@@ -35,8 +24,7 @@
 // module returns NAL units without a start code.
 //
 // Run `cargo test rtp::h264` while you work.
-
-use crate::error::Result;
+use crate::error::{Result, protocol};
 
 pub const START_CODE: [u8; 4] = [0x00, 0x00, 0x00, 0x01];
 
@@ -48,8 +36,7 @@ pub const NAL_FU_A: u8 = 28;
 /// packets.
 #[derive(Debug, Default)]
 pub struct Depacketizer {
-    /// The NAL unit that is currently being rebuilt from FU-A fragments, if there
-    /// is one.
+    /// The NAL unit that is currently being rebuilt from FU-A fragments, if there is one.
     partial: Option<Vec<u8>>,
     /// The sequence number of the last accepted fragment, used to detect a gap.
     last_seq: Option<u16>,
@@ -64,9 +51,43 @@ impl Depacketizer {
     /// produced: none when only a fragment arrived, one for a single NAL unit or for
     /// a finished FU-A, and several for a STAP-A.
     pub fn push(&mut self, sequence_number: u16, payload: &[u8]) -> Result<Vec<Vec<u8>>> {
-        let _ = (sequence_number, payload, &self.partial, &self.last_seq);
-        let _ = (NAL_STAP_A, NAL_FU_A);
-        todo!("week 4: dispatch on the NAL type and reassemble FU-A")
+        let _ = self.partial;
+        // Check payload exists
+        if payload.is_empty() {
+            return protocol("empty payload is given");
+        }
+        
+        // Get type from first byte of the payload (lowest 5 bits)
+        let nal_type = payload[0] & 0b0001_1111;
+        match nal_type {
+            1..=23 => {
+                self.last_seq = Some(sequence_number);
+                Ok(vec![payload.to_vec()])
+            }
+            NAL_STAP_A => {
+                // STAP-A
+                let mut result = vec![];
+                let mut index = 1;
+
+                while index + 1 < payload.len() {
+                    // read 2 bytes first to check length
+                    let length = u16::from_be_bytes([payload[index], payload[index + 1]]) as usize;
+                    index += 2;
+
+                    if index + length <= payload.len() {
+                        result.push(payload[index..index + length].to_vec());
+                        index += length;
+                    } else {
+                        return protocol("insufficient payload is given for STAP-A type payload");
+                    }
+                }
+                Ok(result)
+            }
+            NAL_FU_A => {
+                Ok(vec![])
+            }
+            other => protocol(format!("unsupported NAL type {other}"))
+        }
     }
 }
 
