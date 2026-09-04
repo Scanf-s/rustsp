@@ -51,7 +51,6 @@ impl Depacketizer {
     /// produced: none when only a fragment arrived, one for a single NAL unit or for
     /// a finished FU-A, and several for a STAP-A.
     pub fn push(&mut self, sequence_number: u16, payload: &[u8]) -> Result<Vec<Vec<u8>>> {
-        let _ = self.partial;
         // Check payload exists
         if payload.is_empty() {
             return protocol("empty payload is given");
@@ -61,11 +60,17 @@ impl Depacketizer {
         let nal_type = payload[0] & 0b0001_1111;
         match nal_type {
             1..=23 => {
-                self.last_seq = Some(sequence_number);
+                // Full-single NAL data is stored in single RTP payload
+
+                // If a complete single NAL arrived while an FU-A have been under construction,
+                // we need to discard existing last_seq and partial data
+                self.last_seq = None;
+                self.partial = None;
                 Ok(vec![payload.to_vec()])
             }
             NAL_STAP_A => {
                 // STAP-A
+                // Partially distributed h.264 data is stored in single RTP payload
                 let mut result = vec![];
                 let mut index = 1;
 
@@ -84,7 +89,66 @@ impl Depacketizer {
                 Ok(result)
             }
             NAL_FU_A => {
-                Ok(vec![])
+                // Large h.264 data will be sent through several RTP payload
+                // check if payload has enough length
+                if payload.len() < 2 {
+                    return protocol("FU-A payload is too short");
+                }
+
+                let fu_indicator = payload[0];
+
+                // read FU header
+                // S | E | R | NAL TYPE
+                // 1   1   1      5
+                let fu_header = payload[1];
+                // if start bit is 1 -> this payload represents the starting point of splitted h.264 data
+                let start = fu_header & 0x80 != 0; 
+                // if end bit is 1 -> this payload represents the end point of splitted h.264 data
+                let end = fu_header & 0x40 != 0;
+                // this is the origin type of RTP payload. we need to combine this origin_nal_type with payload[0] which has F/NRI bit
+                let origin_nal_type = fu_header & 0x1F;
+
+                // construct origin nal header using fu_indicator and origin_nal_type
+                let origin_nal_header = (fu_indicator & 0xE0) | (origin_nal_type);
+                
+                // If this payload represents the first h.264 data
+                if start {
+                    let mut nal = Vec::new();
+                    nal.push(origin_nal_header);
+                    nal.extend_from_slice(&payload[2..]);
+                    self.last_seq = Some(sequence_number);
+                    self.partial = Some(nal);
+                    return Ok(vec![]);
+                }
+                
+                // middle or end h.264 data
+                // wrapping_add resolves u16 overflow error when it happens
+                let is_valid = self.partial.is_some() 
+                    && self.last_seq.is_some_and(|last| {
+                        last.wrapping_add(1) == sequence_number
+                    });
+
+                if !is_valid {
+                    // If partial is none or last_seq is none in the middle of or at the end of the h.264 data
+                    // This represents invalid status on h.264 payload
+                    self.partial = None;
+                    self.last_seq = None;
+                    return Ok(vec![])
+                }
+
+                if end {
+                    // end of the h.264 data
+                    let mut entire_h264 = self.partial.take().unwrap();
+                    entire_h264.extend_from_slice(&payload[2..]);
+                    self.last_seq = None;
+                    self.partial = None;
+                    Ok(vec![entire_h264])
+                } else {
+                    // middle h.264 data
+                    self.last_seq = Some(sequence_number);
+                    self.partial.as_mut().unwrap().extend_from_slice(&payload[2..]);
+                    return Ok(vec![]);
+                }
             }
             other => protocol(format!("unsupported NAL type {other}"))
         }
