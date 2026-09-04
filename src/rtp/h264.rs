@@ -55,7 +55,7 @@ impl Depacketizer {
         if payload.is_empty() {
             return protocol("empty payload is given");
         }
-        
+
         // Get type from first byte of the payload (lowest 5 bits)
         let nal_type = payload[0] & 0b0001_1111;
         match nal_type {
@@ -76,7 +76,7 @@ impl Depacketizer {
                 // we need to discard existing last_seq and partial data
                 self.last_seq = None;
                 self.partial = None;
-                
+
                 let mut result = vec![];
                 let mut index = 1;
 
@@ -108,7 +108,7 @@ impl Depacketizer {
                 // 1   1   1      5
                 let fu_header = payload[1];
                 // if start bit is 1 -> this payload represents the starting point of splitted h.264 data
-                let start = fu_header & 0x80 != 0; 
+                let start = fu_header & 0x80 != 0;
                 // if end bit is 1 -> this payload represents the end point of splitted h.264 data
                 let end = fu_header & 0x40 != 0;
                 // this is the origin type of RTP payload. we need to combine this origin_nal_type with payload[0] which has F/NRI bit
@@ -116,7 +116,7 @@ impl Depacketizer {
 
                 // construct origin nal header using fu_indicator and origin_nal_type
                 let origin_nal_header = (fu_indicator & 0xE0) | (origin_nal_type);
-                
+
                 // If this payload represents the first h.264 data
                 if start {
                     let mut nal = Vec::new();
@@ -126,20 +126,20 @@ impl Depacketizer {
                     self.partial = Some(nal);
                     return Ok(vec![]);
                 }
-                
+
                 // middle or end h.264 data
                 // wrapping_add resolves u16 overflow error when it happens
-                let is_valid = self.partial.is_some() 
-                    && self.last_seq.is_some_and(|last| {
-                        last.wrapping_add(1) == sequence_number
-                    });
+                let is_valid = self.partial.is_some()
+                    && self
+                        .last_seq
+                        .is_some_and(|last| last.wrapping_add(1) == sequence_number);
 
                 if !is_valid {
                     // If partial is none or last_seq is none in the middle of or at the end of the h.264 data
                     // This represents invalid status on h.264 payload
                     self.partial = None;
                     self.last_seq = None;
-                    return Ok(vec![])
+                    return Ok(vec![]);
                 }
 
                 if end {
@@ -152,11 +152,14 @@ impl Depacketizer {
                 } else {
                     // middle h.264 data
                     self.last_seq = Some(sequence_number);
-                    self.partial.as_mut().unwrap().extend_from_slice(&payload[2..]);
-                    return Ok(vec![]);
+                    self.partial
+                        .as_mut()
+                        .unwrap()
+                        .extend_from_slice(&payload[2..]);
+                    Ok(vec![])
                 }
             }
-            other => protocol(format!("unsupported NAL type {other}"))
+            other => protocol(format!("unsupported NAL type {other}")),
         }
     }
 }

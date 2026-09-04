@@ -119,10 +119,10 @@ impl Session {
 
         // The response has to repeat the CSeq value that was sent, because that is
         // how a response is matched with its request.
-        if let Some(echo) = resp.header("CSeq") {
-            if echo.trim().parse::<u32>() != Ok(self.cseq) {
-                return protocol(format!("CSeq mismatch: sent {}, got {echo}", self.cseq));
-            }
+        if let Some(echo) = resp.header("CSeq")
+            && echo.trim().parse::<u32>() != Ok(self.cseq)
+        {
+            return protocol(format!("CSeq mismatch: sent {}, got {echo}", self.cseq));
         }
 
         Ok(resp)

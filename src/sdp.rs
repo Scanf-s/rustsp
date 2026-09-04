@@ -76,12 +76,12 @@ pub fn parse(text: &str) -> Result<Sdp> {
                     },
                     "rtpmap" => {
                         // rtpmap:96 H264/90000
-                        if let Some(m) = sdp.media.last_mut() {
-                            if let Some((_pt, enc)) = rest.split_once(' ') {
-                                let mut parts = enc.split('/');
-                                m.encoding = parts.next().map(|s| s.to_string());
-                                m.clock_rate = parts.next().and_then(|s| s.parse().ok());
-                            }
+                        if let Some(m) = sdp.media.last_mut()
+                            && let Some((_pt, enc)) = rest.split_once(' ')
+                        {
+                            let mut parts = enc.split('/');
+                            m.encoding = parts.next().map(|s| s.to_string());
+                            m.clock_rate = parts.next().and_then(|s| s.parse().ok());
                         }
                     }
                     "fmtp" => {
