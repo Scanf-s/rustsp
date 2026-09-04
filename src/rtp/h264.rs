@@ -71,6 +71,12 @@ impl Depacketizer {
             NAL_STAP_A => {
                 // STAP-A
                 // Partially distributed h.264 data is stored in single RTP payload
+
+                // If a complete single NAL arrived while an FU-A have been under construction,
+                // we need to discard existing last_seq and partial data
+                self.last_seq = None;
+                self.partial = None;
+                
                 let mut result = vec![];
                 let mut index = 1;
 
